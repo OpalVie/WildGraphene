@@ -1,0 +1,13 @@
+name: 'Setup Networking Configs'
+description: 'Enable networking-related kernel configuration options'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Enable IP Set & Firewall Configs
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        python3 "${{ github.workspace }}/.github/scripts/append_fragment.py" \
+          "${{ github.workspace }}/.github/actions/networking-config/networking-config.fragment" \
+          --dest wild_defconfig.fragment --label networking-config

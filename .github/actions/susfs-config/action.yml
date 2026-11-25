@@ -1,0 +1,13 @@
+name: 'Enable SUSFS Kernel Configs'
+description: 'Enable SUSFS-related kernel configuration options'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Enable SUSFS Kernel Configs
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        python3 "${{ github.workspace }}/.github/scripts/append_fragment.py" \
+          "${{ github.workspace }}/.github/actions/susfs-config/enable-susfs-kernel-configs.fragment" \
+          --dest wild_defconfig.fragment --label enable-susfs-kernel-configs

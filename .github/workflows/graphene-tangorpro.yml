@@ -1,0 +1,39 @@
+name: GrapheneOS tangorpro - KernelSU-Next SUSFS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: graphene-tangorpro-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git python3 libssl-dev libelf-dev bc bison flex rsync zip unzip file lz4 zstd dwarves
+          df -h .
+          free -h
+      - name: Build pinned GrapheneOS kernel and modules
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          bash scripts/build-graphene-tangorpro.sh 2>&1 | tee artifacts/build.log
+      - name: Preserve build results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tangorpro-2026111800-experimental
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0

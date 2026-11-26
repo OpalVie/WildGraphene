@@ -1,0 +1,13 @@
+{
+  "grapheneos_release": "2026111800",
+  "wrapper_commit": "800b61f19d81645d0d55e3b932eeec64152ef0d5",
+  "kernel_commit": "d888ecda03b1e9774d4eca52acefd363a8268ed9",
+  "kernelsu_next_commit": "6238557b3eb938f3b122b486db77ff149a4fcfa1",
+  "kernelsu_version": 33647,
+  "susfs_base_commit": "f76b81f2a6bf98e4029cc0c823c054edbec29803",
+  "susfs_extra_commits": [
+    "6387756d64b3ab9ececefc4523627a9ee05a7519",
+    "161c058fed5544a6573d87124f346dadd5c4962d"
+  ],
+  "status": "Bazel analysis passed locally. Compilation and runtime untested. Includes local Kbuild version pin and two SUSFS include-context adjustments."
+}

@@ -5,3 +5,10 @@ keys/
 *.pk8
 *.p12
 *.pfx
+
+# Generated OTA pipeline files
+__pycache__/
+*.pyc
+/artifacts/
+/prepared/
+/release/

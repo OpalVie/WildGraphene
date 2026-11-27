@@ -1,0 +1,6 @@
+{
+  "release": "2026111800",
+  "upstream_avb_sha256": "94df136e6c6aa08dc26580af46f36419b5f9baf46039db076f5295b91aaff230",
+  "avbroot_commit": "7dfb91140251cad2e0b6db0a32ae12c379fb4981",
+  "custota_commit": "e6b5e6dd17cf40996b19043864faefa4cf5d2a3e"
+}

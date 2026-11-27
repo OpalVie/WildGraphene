@@ -1,0 +1,163 @@
+name: WildGraphene - signed Custota updates
+
+on:
+  schedule:
+    - cron: '17 10 * * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Sign and publish (requires configured secrets and a boot-tested release)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tangorpro-ota
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      release: ${{ steps.check.outputs.release }}
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test release compatibility gate
+        run: python3 -m unittest discover -s tests -p test_ota_release.py
+      - name: Check upstream and reviewed kernel snapshot
+        id: check
+        run: python3 scripts/check-ota-release.py
+      - name: Skip scheduled releases already published
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ steps.check.outputs.release }}
+          AUTO_PUBLISH: ${{ vars.WILDGRAPHENE_AUTO_PUBLISH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          build=true
+          if [[ "$GITHUB_EVENT_NAME" == schedule && "$AUTO_PUBLISH" != true ]]; then
+            build=false
+          elif [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+            if python3 -c 'import json,sys; p="tangorpro-"+sys.argv[1]+"-"; releases=json.load(open(sys.argv[2])); sys.exit(0 if any(r["tag_name"].startswith(p) and not r["draft"] and not r["prerelease"] for r in releases) else 1)' "$RELEASE" "$RUNNER_TEMP/releases.json"; then
+              build=false
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+  prepare:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free unused hosted-runner SDK space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h .
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git python3 libssl-dev libelf-dev bc bison flex rsync zip unzip file lz4 zstd dwarves e2fsprogs kmod pkg-config cmake clang protobuf-compiler
+      - name: Install pinned OTA tools
+        run: bash scripts/install-ota-tools.sh
+      - name: Build kernel and matching modules
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          bash scripts/build-graphene-tangorpro.sh 2>&1 | tee artifacts/build.log
+      - name: Verify upstream and prepare matching partitions
+        run: bash scripts/prepare-ota.sh
+      - name: Preserve prepared OTA inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-tangorpro-${{ needs.check.outputs.release }}
+          path: prepared/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Preserve kernel logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-logs-${{ needs.check.outputs.release }}
+          path: artifacts/
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    needs: [check, prepare]
+    # Never publish the first untested build to an installed updater.
+    if: >-
+      needs.check.outputs.release == vars.WILDGRAPHENE_BOOT_TESTED_RELEASE &&
+      ((github.event_name == 'workflow_dispatch' && inputs.publish) ||
+       (github.event_name == 'schedule' && vars.WILDGRAPHENE_AUTO_PUBLISH == 'true'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: ota-signing
+    permissions:
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: prepared-tangorpro-${{ needs.check.outputs.release }}
+          path: prepared/
+      - name: Install signing-tool dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git pkg-config libssl-dev cmake clang protobuf-compiler
+      - name: Install pinned OTA tools
+        run: bash scripts/install-ota-tools.sh
+      - name: Sign, verify, and generate Custota metadata
+        env:
+          WG_AVB_KEY_B64: ${{ secrets.WG_AVB_KEY_B64 }}
+          WG_OTA_KEY_B64: ${{ secrets.WG_OTA_KEY_B64 }}
+          WG_OTA_CERT_B64: ${{ secrets.WG_OTA_CERT_B64 }}
+          WG_AVB_PUBLIC_KEY_B64: ${{ secrets.WG_AVB_PUBLIC_KEY_B64 }}
+          WG_AVB_PASSPHRASE: ${{ secrets.WG_AVB_PASSPHRASE }}
+          WG_OTA_PASSPHRASE: ${{ secrets.WG_OTA_PASSPHRASE }}
+        run: bash scripts/sign-publish-ota.sh
+      - name: Publish immutable release assets before updating the feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.check.outputs.release }}
+        run: |
+          set -euo pipefail
+          tag="$(cat release/release-tag.txt)"
+          gh release create "$tag" --target "$GITHUB_SHA" \
+            --title "WildGraphene tangorpro $RELEASE" \
+            --notes "GrapheneOS $RELEASE with matching KernelSU-Next/SUSFS kernel and modules. Signed and verified; see included source provenance and checksums." \
+            release/*.zip release/*.csig release/SHA256SUMS release/*json release/custota-signature-info.txt
+      - name: Update the GitHub Pages Custota feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Updating via the Contents API avoids overwriting concurrent main-branch changes.
+          python3 - <<'PY'
+          import base64, json, os, subprocess
+          from pathlib import Path
+          repo=os.environ['GITHUB_REPOSITORY']
+          endpoint=f'repos/{repo}/contents/tangorpro.json'
+          result=subprocess.run(['gh','api',endpoint+'?ref=main'],capture_output=True,text=True)
+          payload={'message':'Publish verified tangorpro Custota update','branch':'main',
+                   'content':base64.b64encode(Path('release/tangorpro.json').read_bytes()).decode()}
+          if result.returncode == 0:
+              payload['sha']=json.loads(result.stdout)['sha']
+          elif '404' not in result.stderr:
+              raise SystemExit(result.stderr)
+          subprocess.run(['gh','api','--method','PUT',endpoint,'--input','-'],
+                         input=json.dumps(payload),text=True,check=True)
+          PY
+      - name: Trigger Pages branch build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds"

@@ -3,14 +3,16 @@ set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 snapshot="$project_dir/kernel/tangorpro"
 build_root="${RUNNER_TEMP:?Run this script on a GitHub-hosted runner}/graphene-kernel-build"
-wrapper_commit=800b61f19d81645d0d55e3b932eeec64152ef0d5
-kernel_commit=d888ecda03b1e9774d4eca52acefd363a8268ed9
+readarray -t pins < <(python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p["grapheneos_release"]); print(p["wrapper_commit"]); print(p["kernel_commit"])' "$snapshot/provenance.json")
+release="${pins[0]}"
+wrapper_commit="${pins[1]}"
+kernel_commit="${pins[2]}"
 test ! -e "$build_root" || { echo 'Build directory already exists; refusing to overwrite'; exit 1; }
 mkdir -p "$project_dir/artifacts"
 cd "$snapshot"
 sha256sum -c SHA256SUMS
 cp provenance.json "$project_dir/artifacts/source-provenance.json"
-git clone --depth 1 --branch 2026111800 --no-recurse-submodules \
+git clone --depth 1 --branch "$release" --no-recurse-submodules \
   https://gitlab.com/grapheneos/kernel_pixel_6.1.git "$build_root"
 test "$(git -C "$build_root" rev-parse HEAD)" = "$wrapper_commit"
 git -C "$build_root" submodule update --init --depth 1 common/ack
@@ -38,6 +40,9 @@ test -f "$config_dir/.config"
 cp "$config_dir/.config" "$project_dir/artifacts/gki-resolved.config"
 grep -qx 'CONFIG_KSU=y' "$project_dir/artifacts/gki-resolved.config"
 grep -qx 'CONFIG_KSU_SUSFS=y' "$project_dir/artifacts/gki-resolved.config"
+for option in ARM64_4K_PAGES CFI_CLANG MODVERSIONS MODULE_SIG_FORCE RANDSTRUCT_FULL; do
+  grep -qx "CONFIG_${option}=y" "$project_dir/artifacts/gki-resolved.config"
+done
 ./build_tangorpro.sh --jobs=2 --local_cpu_resources=2
 test -d out/tangorpro/dist
 # Distribution outputs must never include generated private module keys.

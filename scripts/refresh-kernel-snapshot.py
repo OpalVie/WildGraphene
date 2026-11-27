@@ -32,6 +32,26 @@ def clone(url, commit, dest, full=False):
         raise ValueError('Checkout does not match resolved commit')
 
 
+def apply_susfs_fix(repo, commit, temp, remote='https://gitlab.com/pershoot/susfs4ksu.git'):
+    # Fetch the parent too: depth=1 makes `git show` treat a commit as a root,
+    # generating an add-every-file patch instead of just this compatibility fix.
+    run('git','-C',repo,'fetch','--depth','2',remote,commit)
+    parents=run('git','-C',repo,'rev-list','--parents','-n','1',commit).split()
+    if len(parents) != 2:
+        raise ValueError('Compatibility fix must have exactly one available parent')
+    parent=parents[1]
+    paths=run('git','-C',repo,'diff','--name-only',parent,commit).splitlines()
+    if paths != ['kernel_patches/fs/susfs.c']:
+        raise ValueError('Unexpected files in SUSFS compatibility fix: '+str(paths))
+    patch=run('git','-C',repo,'diff','--binary',parent,commit,binary=True)
+    p=temp/(commit+'.patch');p.write_bytes(patch)
+    if subprocess.run(['git','-C',str(repo),'apply','--reverse','--check',str(p)],capture_output=True).returncode == 0:
+        return False  # This exact fix is already present.
+    run('git','-C',repo,'apply','--check',p)
+    run('git','-C',repo,'apply',p)
+    return True
+
+
 def adapt_patch(patch, kernel):
     """Only account for the two already-reviewed GrapheneOS include additions.
 
@@ -92,14 +112,8 @@ def main():
     provenance=json.loads((ROOT/'kernel/tangorpro/provenance.json').read_text())
     extras=[]
     for commit in provenance['susfs_extra_commits']:
-        run('git','-C',susfs,'fetch','--depth','1','https://gitlab.com/pershoot/susfs4ksu.git',commit)
-        patch=run('git','-C',susfs,'show','--format=','--binary',commit,binary=True)
-        p=temp/(commit+'.patch');p.write_bytes(patch)
-        if subprocess.run(['git','-C',str(susfs),'apply','--reverse','--check',str(p)],capture_output=True).returncode == 0:
-            continue  # This exact compatibility fix is already present.
-        run('git','-C',susfs,'apply','--check',p)
-        run('git','-C',susfs,'apply',p)
-        extras.append(commit)
+        if apply_susfs_fix(susfs,commit,temp):
+            extras.append(commit)
     patch=adapt_patch((susfs/'kernel_patches/50_add_susfs_in_gki-android14-6.1.patch').read_text(),kernel)
     # Retain only the known KernelSU driver wiring from our existing snapshot.
     existing=(ROOT/'kernel/tangorpro/tracked.patch').read_text()

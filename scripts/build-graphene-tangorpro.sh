@@ -23,12 +23,21 @@ test -f common/ack/fs/susfs.c
 test -f common/ack/include/linux/susfs.h
 test -f common/ack/include/linux/susfs_def.h
 test -f common/ack/drivers/kernelsu/Kbuild
-grep -qx 'CONFIG_KSU=y' common/ack/arch/arm64/configs/gki_defconfig
-grep -qx 'CONFIG_KSU_SUSFS=y' common/ack/arch/arm64/configs/gki_defconfig
 export TMPDIR="${RUNNER_TEMP}"
 export KLEAF_REPO_MANIFEST=aosp_manifest.xml
 # Kernel and device modules must be built together. Keep the source build,
 # module signature checks, CFI, RANDSTRUCT and ABI checks enabled.
+# Both options default to y in the integrated Kconfig. Explicitly adding
+# them to gki_defconfig is redundant and fails the savedefconfig check.
+# Verify the resolved configuration before spending time compiling.
+tools/bazel build --config=stamp --config=tangorpro \
+  --jobs=2 --local_cpu_resources=2 //common/ack:kernel_aarch64_config
+config_dir="$(tools/bazel cquery --config=stamp --config=tangorpro \
+  --output=files //common/ack:kernel_aarch64_config)"
+test -f "$config_dir/.config"
+cp "$config_dir/.config" "$project_dir/artifacts/gki-resolved.config"
+grep -qx 'CONFIG_KSU=y' "$project_dir/artifacts/gki-resolved.config"
+grep -qx 'CONFIG_KSU_SUSFS=y' "$project_dir/artifacts/gki-resolved.config"
 ./build_tangorpro.sh --jobs=2 --local_cpu_resources=2
 test -d out/tangorpro/dist
 # Distribution outputs must never include generated private module keys.

@@ -16,6 +16,10 @@ python3 "$project/scripts/prepare-ota-images.py" \
   --tools "$RUNNER_TEMP/graphene-kernel-build/prebuilts/kernel-build-tools/linux-x86/bin" \
   --output "$project/prepared"
 cp "$project/artifacts/source-provenance.json" "$project/prepared/"
+cp "$project/ota/tangorpro.json" "$project/prepared/ota-config.json"
+cp "$project/upstream-state/candidate.json" "$project/prepared/candidate.json"
+mkdir -p "$project/prepared/snapshot"
+cp "$project/kernel/tangorpro/"* "$project/prepared/snapshot/"
 cd "$project/prepared"
 sha256sum upstream.zip boot.img system_dlkm.img vendor_dlkm.img vendor_kernel_boot.img \
-  verification-report.json source-provenance.json > SHA256SUMS
+  verification-report.json source-provenance.json ota-config.json candidate.json snapshot/* > SHA256SUMS

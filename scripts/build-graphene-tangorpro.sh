@@ -7,16 +7,21 @@ readarray -t pins < <(python3 -c 'import json,sys; p=json.load(open(sys.argv[1])
 release="${pins[0]}"
 wrapper_commit="${pins[1]}"
 kernel_commit="${pins[2]}"
-test ! -e "$build_root" || { echo 'Build directory already exists; refusing to overwrite'; exit 1; }
+if [[ -e "$build_root" && "${WILDGRAPHENE_CANDIDATE_SOURCE:-}" != 1 ]]; then
+  echo 'Build directory already exists; refusing to overwrite' >&2; exit 1
+fi
 mkdir -p "$project_dir/artifacts"
 cd "$snapshot"
 sha256sum -c SHA256SUMS
 cp provenance.json "$project_dir/artifacts/source-provenance.json"
-git clone --depth 1 --branch "$release" --no-recurse-submodules \
-  https://gitlab.com/grapheneos/kernel_pixel_6.1.git "$build_root"
+if [[ ! -d "$build_root" ]]; then
+  git clone --depth 1 --branch "$release" --no-recurse-submodules \
+    https://gitlab.com/grapheneos/kernel_pixel_6.1.git "$build_root"
+fi
 test "$(git -C "$build_root" rev-parse HEAD)" = "$wrapper_commit"
 git -C "$build_root" submodule update --init --depth 1 common/ack
 test "$(git -C "$build_root/common/ack" rev-parse HEAD)" = "$kernel_commit"
+test -z "$(git -C "$build_root/common/ack" status --porcelain --untracked-files=all)"
 git -C "$build_root/common/ack" apply --check "$snapshot/tracked.patch"
 git -C "$build_root/common/ack" apply "$snapshot/tracked.patch"
 tar -xzf "$snapshot/source-overlay.tar.gz" -C "$build_root/common/ack"
